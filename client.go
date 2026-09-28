@@ -189,12 +189,31 @@ func (c *Client) ListEvents(ctx context.Context, query string) (JSON, error) {
 	return out, nil
 }
 
+// GetEmailEvents diagnoses one email's delivery: its lifecycle timeline
+// and, for each delivery attempt, the SMTP outcome and failure
+// classification. Tenant-scoped diagnostics, distinct from ListEvents'
+// tenant-wide public event feed.
+func (c *Client) GetEmailEvents(ctx context.Context, id string) (JSON, error) {
+	var out JSON
+	if err := c.request(ctx, http.MethodGet, "/v1/emails/"+id+"/events", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *Client) resource(ctx context.Context, method, path string, body any) (JSON, error) {
 	var out JSON
 	if err := c.request(ctx, method, path, body, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Whoami introspects the authenticated API key: the organization it
+// belongs to and the key's own public identity (id, name, scopes) - never
+// the raw secret or its hash.
+func (c *Client) Whoami(ctx context.Context) (JSON, error) {
+	return c.resource(ctx, http.MethodGet, "/v1/whoami", nil)
 }
 
 func (c *Client) CreateDomain(ctx context.Context, body JSON) (JSON, error) {
@@ -210,14 +229,40 @@ func (c *Client) DeleteDomain(ctx context.Context, id string) error {
 	_, err := c.resource(ctx, http.MethodDelete, "/v1/domains/"+id, nil)
 	return err
 }
+
+// VerifyDomain re-checks DNS ownership verification for a pending domain
+// (the TXT record CreateDomain's response asked you to publish).
+func (c *Client) VerifyDomain(ctx context.Context, id string) (JSON, error) {
+	return c.resource(ctx, http.MethodPost, "/v1/domains/"+id+"/verify", nil)
+}
+
+// GetDKIM returns a domain's DKIM key and verification status.
+func (c *Client) GetDKIM(ctx context.Context, domainID string) (JSON, error) {
+	return c.resource(ctx, http.MethodGet, "/v1/domains/"+domainID+"/dkim", nil)
+}
+
+// CreateDKIM generates (or rotates) a domain's DKIM key.
+func (c *Client) CreateDKIM(ctx context.Context, domainID string) (JSON, error) {
+	return c.resource(ctx, http.MethodPost, "/v1/domains/"+domainID+"/dkim", nil)
+}
 func (c *Client) VerifyDKIM(ctx context.Context, domainID string) (JSON, error) {
 	return c.resource(ctx, http.MethodPost, "/v1/domains/"+domainID+"/dkim/verify", nil)
 }
 func (c *Client) GetSPF(ctx context.Context, domainID string) (JSON, error) {
 	return c.resource(ctx, http.MethodGet, "/v1/domains/"+domainID+"/spf", nil)
 }
+
+// VerifySPF re-checks a domain's SPF record.
+func (c *Client) VerifySPF(ctx context.Context, domainID string) (JSON, error) {
+	return c.resource(ctx, http.MethodPost, "/v1/domains/"+domainID+"/spf/verify", nil)
+}
 func (c *Client) GetDMARC(ctx context.Context, domainID string) (JSON, error) {
 	return c.resource(ctx, http.MethodGet, "/v1/domains/"+domainID+"/dmarc", nil)
+}
+
+// VerifyDMARC re-checks a domain's DMARC record.
+func (c *Client) VerifyDMARC(ctx context.Context, domainID string) (JSON, error) {
+	return c.resource(ctx, http.MethodPost, "/v1/domains/"+domainID+"/dmarc/verify", nil)
 }
 func (c *Client) GetBIMI(ctx context.Context, domainID string) (JSON, error) {
 	return c.resource(ctx, http.MethodGet, "/v1/domains/"+domainID+"/bimi", nil)
@@ -241,6 +286,13 @@ func (c *Client) UpdateTemplate(ctx context.Context, id string, body JSON) (JSON
 func (c *Client) DeleteTemplate(ctx context.Context, id string) error {
 	_, err := c.resource(ctx, http.MethodDelete, "/v1/templates/"+id, nil)
 	return err
+}
+
+// PreviewTemplate renders a template's subject/text/html with the given
+// variables, with no side effects - use it before SendEmail/CreateBroadcast
+// to check a template looks right. body is typically {"variables": {...}}.
+func (c *Client) PreviewTemplate(ctx context.Context, id string, body JSON) (JSON, error) {
+	return c.resource(ctx, http.MethodPost, "/v1/templates/"+id+"/preview", body)
 }
 
 func (c *Client) CreateContact(ctx context.Context, body JSON) (JSON, error) {
@@ -269,8 +321,29 @@ func (c *Client) GetAudience(ctx context.Context, id string) (JSON, error) {
 func (c *Client) ListAudiences(ctx context.Context) (JSON, error) {
 	return c.resource(ctx, http.MethodGet, "/v1/audiences", nil)
 }
+func (c *Client) UpdateAudience(ctx context.Context, id string, body JSON) (JSON, error) {
+	return c.resource(ctx, http.MethodPatch, "/v1/audiences/"+id, body)
+}
 func (c *Client) DeleteAudience(ctx context.Context, id string) error {
 	_, err := c.resource(ctx, http.MethodDelete, "/v1/audiences/"+id, nil)
+	return err
+}
+
+// AddAudienceMember adds an existing Contact to an Audience. body is
+// {"contact_id": "..."}.
+func (c *Client) AddAudienceMember(ctx context.Context, audienceID string, body JSON) (JSON, error) {
+	return c.resource(ctx, http.MethodPost, "/v1/audiences/"+audienceID+"/contacts", body)
+}
+
+// ListAudienceMembers lists the Contacts in an Audience.
+func (c *Client) ListAudienceMembers(ctx context.Context, audienceID string) (JSON, error) {
+	return c.resource(ctx, http.MethodGet, "/v1/audiences/"+audienceID+"/contacts", nil)
+}
+
+// RemoveAudienceMember removes a Contact from an Audience (never deletes
+// the Contact itself).
+func (c *Client) RemoveAudienceMember(ctx context.Context, audienceID, contactID string) error {
+	_, err := c.resource(ctx, http.MethodDelete, "/v1/audiences/"+audienceID+"/contacts/"+contactID, nil)
 	return err
 }
 
@@ -283,12 +356,31 @@ func (c *Client) GetBroadcast(ctx context.Context, id string) (JSON, error) {
 func (c *Client) ListBroadcasts(ctx context.Context) (JSON, error) {
 	return c.resource(ctx, http.MethodGet, "/v1/broadcasts", nil)
 }
+
+// PreviewBroadcast resolves an audience and evaluates suppression against
+// it, returning recipient/suppressed/eligible counts before a broadcast is
+// created - the bulk-send safety check. body is {"audience_id", "template_id"}.
+func (c *Client) PreviewBroadcast(ctx context.Context, body JSON) (JSON, error) {
+	return c.resource(ctx, http.MethodPost, "/v1/broadcasts/preview", body)
+}
+
+// ListBroadcastRecipients lists one broadcast's recipients and their
+// per-recipient status, keyset paginated.
+func (c *Client) ListBroadcastRecipients(ctx context.Context, id string) (JSON, error) {
+	return c.resource(ctx, http.MethodGet, "/v1/broadcasts/"+id+"/recipients", nil)
+}
+
 func (c *Client) GetAnalytics(ctx context.Context, query string) (JSON, error) {
 	return c.resource(ctx, http.MethodGet, "/v1/analytics"+query, nil)
 }
 
 func (c *Client) ListSuppressions(ctx context.Context) (JSON, error) {
 	return c.resource(ctx, http.MethodGet, "/v1/suppressions", nil)
+}
+
+// GetSuppression returns one suppression entry.
+func (c *Client) GetSuppression(ctx context.Context, id string) (JSON, error) {
+	return c.resource(ctx, http.MethodGet, "/v1/suppressions/"+id, nil)
 }
 func (c *Client) CreateSuppression(ctx context.Context, body JSON) (JSON, error) {
 	return c.resource(ctx, http.MethodPost, "/v1/suppressions", body)
@@ -307,10 +399,18 @@ func (c *Client) GetWebhook(ctx context.Context, id string) (JSON, error) {
 func (c *Client) ListWebhooks(ctx context.Context) (JSON, error) {
 	return c.resource(ctx, http.MethodGet, "/v1/webhooks", nil)
 }
-func (c *Client) UpdateWebhook(ctx context.Context, id string, body JSON) (JSON, error) {
-	return c.resource(ctx, http.MethodPatch, "/v1/webhooks/"+id, body)
-}
 func (c *Client) DeleteWebhook(ctx context.Context, id string) error {
 	_, err := c.resource(ctx, http.MethodDelete, "/v1/webhooks/"+id, nil)
 	return err
+}
+
+// RotateWebhookSecret issues a new signing secret for a webhook endpoint,
+// returned once - store it immediately, MailX cannot recover it later.
+func (c *Client) RotateWebhookSecret(ctx context.Context, id string) (JSON, error) {
+	return c.resource(ctx, http.MethodPost, "/v1/webhooks/"+id+"/rotate-secret", nil)
+}
+
+// ListWebhookDeliveries lists delivery attempts for one webhook endpoint.
+func (c *Client) ListWebhookDeliveries(ctx context.Context, id string) (JSON, error) {
+	return c.resource(ctx, http.MethodGet, "/v1/webhooks/"+id+"/deliveries", nil)
 }

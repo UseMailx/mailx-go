@@ -57,10 +57,14 @@ Failed requests return a `*mailx.APIError` with `Status`, `Type`, `Code`, `Messa
 ## Coverage
 
 Emails and batch sending are fully typed (`SendEmailRequest`, `Email`, `EmailList`,
-`BatchSendRequest`, `BatchSendResponse`). Domains, DKIM/SPF/DMARC/BIMI, templates,
-contacts, audiences, broadcasts, analytics, suppressions, and webhooks are covered with
-typed method signatures returning `mailx.JSON` (`map[string]any`) — see your server's
-`GET /openapi.json` for exact response shapes.
+`BatchSendRequest`, `BatchSendResponse`). Everything else — domains (create, verify,
+DKIM/SPF/DMARC/BIMI including verify), templates (including preview), contacts,
+audiences (including membership), broadcasts (including preview and recipients),
+analytics, suppressions, webhooks (including secret rotation and delivery history),
+email diagnostics (`GetEmailEvents`), and `Whoami` — is covered with typed method
+signatures returning `mailx.JSON` (`map[string]any`) — see your server's
+`GET /openapi.json` for exact response shapes. This SDK now covers the full MailX
+Product API surface; every route has a corresponding method.
 
 ## Testing
 
